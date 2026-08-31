@@ -270,3 +270,232 @@ impl SnapshotStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde_json::Value;
+    use tempfile::TempDir;
+
+    /// A snapshot path inside a fresh temp dir — tests never touch the real
+    /// state dir. The `TempDir` is returned so it lives (and cleans up) with
+    /// the test.
+    fn temp_store_path() -> (TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("snapshot.json");
+        (dir, path)
+    }
+
+    /// What a reader outside this process sees: the file itself, as JSON.
+    fn read_json(path: &Path) -> Value {
+        let text = fs::read_to_string(path).expect("read snapshot file");
+        serde_json::from_str(&text).expect("snapshot file holds valid json")
+    }
+
+    fn sample_window(app: &str, title: &str) -> ActiveWindowSnapshot {
+        ActiveWindowSnapshot {
+            app_name: app.to_string(),
+            window_title: Some(title.to_string()),
+            captured_at: "2026-08-29T08:00:00Z".to_string(),
+        }
+    }
+
+    /// Every path in `dir` whose name matches `snapshot.corrupt-*.json`.
+    fn quarantine_files(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .expect("read temp dir")
+            .map(|entry| entry.expect("dir entry").path())
+            .filter(|p| {
+                let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                name.starts_with("snapshot.corrupt-") && name.ends_with(".json")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn load_or_create_without_a_file_writes_a_complete_default() {
+        let (_dir, path) = temp_store_path();
+        let store = SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+        assert_eq!(store.path(), path.as_path());
+
+        // The startup no-op write must leave a file carrying every key of the
+        // frozen schema — absent data is null (or [] for recent_commands),
+        // never a missing field.
+        let json = read_json(&path);
+        assert_eq!(json["schema_version"], 1);
+        assert!(json["last_updated"].is_string());
+        assert!(json["active_window"].is_null());
+        assert_eq!(json["recent_commands"], Value::Array(Vec::new()));
+        assert_eq!(json["voice_note"]["transcript"], Value::Null);
+        assert_eq!(json["voice_note"]["summary"], Value::Null);
+        assert_eq!(json["voice_note"]["recorded_at"], Value::Null);
+        assert_eq!(json["browser_tab"]["url"], Value::Null);
+        assert_eq!(json["browser_tab"]["title"], Value::Null);
+        assert_eq!(json["browser_tab"]["captured_at"], Value::Null);
+        // Exactly the six top-level keys — nothing extra, nothing dropped.
+        assert_eq!(json.as_object().expect("top-level object").len(), 6);
+    }
+
+    #[test]
+    fn load_or_create_creates_missing_parent_directories() {
+        // First run on a fresh machine: the state dir doesn't exist yet.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("nested").join("state").join("snapshot.json");
+        SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn load_or_create_round_trips_an_existing_valid_file() {
+        let (_dir, path) = temp_store_path();
+        {
+            let store = SnapshotStore::load_or_create(path.clone()).expect("first store");
+            store
+                .update(|s| {
+                    s.active_window = Some(sample_window("Code.exe", "snapshot.rs"));
+                    s.recent_commands = vec![RecentCommand {
+                        command: "git status".to_string(),
+                        ran_at: "2026-08-29T08:01:00Z".to_string(),
+                    }];
+                    s.voice_note.transcript = Some("remember the milk".to_string());
+                    s.browser_tab.url = Some("https://example.com".to_string());
+                })
+                .expect("update");
+        }
+
+        // A second store — conceptually a fresh process — loads the same data
+        // and writes it back out intact.
+        let _store = SnapshotStore::load_or_create(path.clone()).expect("second store");
+        let json = read_json(&path);
+        assert_eq!(json["active_window"]["app_name"], "Code.exe");
+        assert_eq!(json["active_window"]["window_title"], "snapshot.rs");
+        assert_eq!(json["recent_commands"][0]["command"], "git status");
+        assert_eq!(json["voice_note"]["transcript"], "remember the milk");
+        assert_eq!(json["browser_tab"]["url"], "https://example.com");
+    }
+
+    #[test]
+    fn corrupt_file_is_quarantined_with_its_original_bytes() {
+        let (dir, path) = temp_store_path();
+        let garbage = "{ \"schema_version\": 1, this is not json";
+        fs::write(&path, garbage).expect("plant corrupt file");
+
+        SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+
+        // Exactly one snapshot.corrupt-<timestamp>.json appears alongside,
+        // holding the unparseable original byte for byte.
+        let quarantined = quarantine_files(dir.path());
+        assert_eq!(quarantined.len(), 1, "expected exactly one quarantine file");
+        assert_eq!(
+            fs::read(&quarantined[0]).expect("read quarantine file"),
+            garbage.as_bytes()
+        );
+
+        // And snapshot.json itself starts over as a complete default.
+        let json = read_json(&path);
+        assert_eq!(json["schema_version"], 1);
+        assert!(json["active_window"].is_null());
+        assert_eq!(json["recent_commands"], Value::Array(Vec::new()));
+    }
+
+    #[test]
+    fn valid_json_of_the_wrong_shape_is_also_quarantined() {
+        // Parseable JSON that isn't a Snapshot (missing required keys) must
+        // get the same move-aside treatment as syntactic garbage.
+        let (dir, path) = temp_store_path();
+        let wrong_shape = "[1, 2, 3]";
+        fs::write(&path, wrong_shape).expect("plant wrong-shape file");
+
+        SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+
+        let quarantined = quarantine_files(dir.path());
+        assert_eq!(quarantined.len(), 1);
+        assert_eq!(
+            fs::read(&quarantined[0]).expect("read quarantine file"),
+            wrong_shape.as_bytes()
+        );
+        assert_eq!(read_json(&path)["schema_version"], 1);
+    }
+
+    #[test]
+    fn update_persists_the_edit_and_leaves_other_keys_untouched() {
+        let (_dir, path) = temp_store_path();
+        let store = SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+        store
+            .update(|s| {
+                s.recent_commands = vec![RecentCommand {
+                    command: "cargo build".to_string(),
+                    ran_at: "2026-08-29T08:02:00Z".to_string(),
+                }];
+                s.voice_note = VoiceNote {
+                    transcript: Some("transcript".to_string()),
+                    summary: Some("summary".to_string()),
+                    recorded_at: Some("2026-08-29T08:03:00Z".to_string()),
+                };
+                s.browser_tab = BrowserTab {
+                    url: Some("https://example.com/docs".to_string()),
+                    title: Some("Docs".to_string()),
+                    captured_at: Some("2026-08-29T08:04:00Z".to_string()),
+                };
+            })
+            .expect("seed other components' keys");
+        let before = read_json(&path);
+
+        // One component touches only its own key...
+        store
+            .update(|s| s.active_window = Some(sample_window("notepad.exe", "todo.txt")))
+            .expect("update active_window");
+
+        // ...and on disk that key changed while everyone else's survived.
+        let after = read_json(&path);
+        assert_eq!(after["active_window"]["app_name"], "notepad.exe");
+        assert_eq!(after["active_window"]["window_title"], "todo.txt");
+        for key in ["schema_version", "recent_commands", "voice_note", "browser_tab"] {
+            assert_eq!(after[key], before[key], "`{key}` should be unchanged");
+        }
+    }
+
+    #[test]
+    fn update_restamps_last_updated_and_schema_version_on_every_write() {
+        let (_dir, path) = temp_store_path();
+        let store = SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+
+        // Even an edit that plants its own values gets overwritten — update()
+        // owns these two fields, whichever key the caller meant to change.
+        store
+            .update(|s| {
+                s.last_updated = "not-a-timestamp".to_string();
+                s.schema_version = 999;
+            })
+            .expect("update");
+
+        let json = read_json(&path);
+        assert_eq!(json["schema_version"], 1);
+        let stamped = json["last_updated"].as_str().expect("last_updated is a string");
+        assert_ne!(stamped, "not-a-timestamp");
+        // The contract format: RFC 3339, UTC ("Z"), whole seconds.
+        chrono::DateTime::parse_from_rfc3339(stamped).expect("last_updated parses as rfc3339");
+        assert!(stamped.ends_with('Z'), "timestamp should be UTC: {stamped}");
+        assert_eq!(
+            stamped.len(),
+            "2026-08-29T08:20:14Z".len(),
+            "timestamp should have whole-second precision: {stamped}"
+        );
+    }
+
+    #[test]
+    fn successful_write_leaves_no_temp_file_behind() {
+        let (dir, path) = temp_store_path();
+        let store = SnapshotStore::load_or_create(path.clone()).expect("load_or_create");
+        store
+            .update(|s| s.voice_note.transcript = Some("x".to_string()))
+            .expect("update");
+
+        assert!(path.exists());
+        assert!(
+            !dir.path().join("snapshot.json.tmp").exists(),
+            "temp file should be renamed away after a successful write"
+        );
+    }
+}

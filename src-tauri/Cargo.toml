@@ -41,3 +41,8 @@ hound = "3.5.1"
 # reqwest note above, and Session 3 in architecture.md).
 tiny_http = "0.12"
 
+[dev-dependencies]
+# Unit tests only (snapshot.rs): isolated temp dirs so tests never touch the
+# real state dir.
+tempfile = "3"
+
