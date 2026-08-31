@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-08-29T07:09:28Z",
+  "active_window": {
+    "app_name": "Brave Browser",
+    "window_title": "THIS is Coming to Your Phone NEXT... I Warned You - YouTube - Brave",
+    "captured_at": "2026-08-29T07:09:28Z"
+  },
+  "recent_commands": [
+    { "command": "cd HumCon", "ran_at": "2026-08-29T04:35:20Z" }
+  ],
+  "voice_note": {
+    "transcript": "I need to review the goal request and deploy the new healthist attribute.",
+    "summary": null,
+    "recorded_at": "2026-08-29T07:08:50Z"
+  },
+  "browser_tab": { "url": null, "title": null, "captured_at": null }
+}

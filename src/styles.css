@@ -1,0 +1,259 @@
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 400;
+
+  color: #0f0f0f;
+  background-color: #f6f6f6;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+  padding: 1.25em 1.5em 2em;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  padding-bottom: 0.6em;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.card-title {
+  font-size: 1.3em;
+  margin: 0;
+}
+
+.card-header__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.85em;
+  color: rgba(15, 15, 15, 0.6);
+}
+
+.card-badge {
+  border-radius: 999px;
+  padding: 0.1em 0.6em;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.card-badge--stale {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.card-banner {
+  margin: 0.4em 0 0;
+  padding: 0.5em 0.7em;
+  border-radius: 6px;
+  background: #fff4d6;
+  color: #6b5300;
+  font-size: 0.85em;
+}
+
+.card-refresh-error {
+  margin: 0 0 0.2em;
+  padding: 0.5em 0.7em;
+  border-radius: 6px;
+  background: #fdecea;
+  color: #b3261e;
+  font-size: 0.85em;
+}
+
+.card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+}
+
+.card-section__title {
+  font-size: 0.78em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(15, 15, 15, 0.55);
+  margin: 0;
+}
+
+.card-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.card-empty {
+  margin: 0;
+  color: rgba(15, 15, 15, 0.55);
+  font-style: italic;
+}
+
+.card-hint {
+  margin: 0;
+  font-size: 0.82em;
+  color: rgba(15, 15, 15, 0.45);
+}
+
+.card-window__app {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.05em;
+}
+
+.card-window__title {
+  margin: 0;
+  color: rgba(15, 15, 15, 0.7);
+  word-break: break-word;
+}
+
+.card-commands {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.card-command {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75em;
+  padding: 0.3em 0.5em;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.card-command__text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+.card-command__time {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  color: rgba(15, 15, 15, 0.45);
+}
+
+.card-voice__summary {
+  margin: 0;
+}
+
+.card-voice__summary--unavailable {
+  color: rgba(15, 15, 15, 0.5);
+  font-style: italic;
+}
+
+.card-voice__transcript {
+  margin: 0;
+  padding: 0.5em 0.6em;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(15, 15, 15, 0.75);
+  font-size: 0.9em;
+  word-break: break-word;
+}
+
+.card-browser__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.card-browser__url {
+  margin: 0;
+  color: rgba(15, 15, 15, 0.6);
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f2f2f2;
+    background-color: #202020;
+  }
+
+  .card-header {
+    border-bottom-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .card-header__meta {
+    color: rgba(242, 242, 242, 0.6);
+  }
+
+  .card-badge--stale {
+    background: #3a1e1c;
+    color: #ff8a80;
+  }
+
+  .card-banner {
+    background: #3a3218;
+    color: #f0d47a;
+  }
+
+  .card-refresh-error {
+    background: #3a1e1c;
+    color: #ff8a80;
+  }
+
+  .card-section__title {
+    color: rgba(242, 242, 242, 0.55);
+  }
+
+  .card-empty {
+    color: rgba(242, 242, 242, 0.55);
+  }
+
+  .card-hint {
+    color: rgba(242, 242, 242, 0.45);
+  }
+
+  .card-window__title {
+    color: rgba(242, 242, 242, 0.7);
+  }
+
+  .card-command {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .card-command__time {
+    color: rgba(242, 242, 242, 0.45);
+  }
+
+  .card-voice__summary--unavailable {
+    color: rgba(242, 242, 242, 0.5);
+  }
+
+  .card-voice__transcript {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(242, 242, 242, 0.75);
+  }
+
+  .card-browser__url {
+    color: rgba(242, 242, 242, 0.6);
+  }
+}

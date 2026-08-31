@@ -1,0 +1,43 @@
+[package]
+name = "humcon"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "humcon_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Active-window capture. Windows backend needs no COM/message pump and is
+# safe to call repeatedly from a background thread (see window_capture.rs).
+active-win-pos-rs = "0.11"
+# Timestamps only; the default feature set drags in more than we need.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Blocking HTTP client for the Claude Haiku call (summarize.rs). Blocking is
+# fine here — the call already runs on its own spawned thread, matching the
+# rest of this codebase's thread-based background work rather than pulling in
+# an async runtime for one call site.
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+tauri-plugin-global-shortcut = "2.3.2"
+cpal = "0.18.2"
+hound = "3.5.1"
+# Loopback HTTP receiver for the browser extension (browser_server.rs).
+# Deliberately not axum/warp: those pull in an async runtime, and this codebase
+# has consistently chosen blocking work on its own thread instead (see the
+# reqwest note above, and Session 3 in architecture.md).
+tiny_http = "0.12"
+

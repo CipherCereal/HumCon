@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "HumCon — browser tab reporter",
+  "version": "0.1.0",
+  "description": "Reports the active tab's URL and title to the local HumCon app so its resume card can show what you were reading.",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://127.0.0.1:7423/"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-08-29T17:05:00Z",
+  "active_window": {
+    "app_name": "Windows Terminal",
+    "window_title": null,
+    "captured_at": "2026-08-29T17:04:58Z"
+  },
+  "recent_commands": [
+    { "command": "git status", "ran_at": "2026-08-29T17:04:30Z" }
+  ],
+  "voice_note": { "transcript": null, "summary": null, "recorded_at": null },
+  "browser_tab": { "url": null, "title": null, "captured_at": null }
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-08-29T17:00:00Z",
+  "active_window": {
+    "app_name": "件名が非常に長いアプリケーション名前 😀",
+    "window_title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA�",
+    "captured_at": "2026-08-29T16:59:58Z"
+  },
+  "recent_commands": [
+    {
+      "command": "echo 'step 0' && ./run.sh --flag=value0",
+      "ran_at": "2026-08-29T16:00:00Z"
+    },
+    {
+      "command": "echo 'step 1' && ./run.sh --flag=value1",
+      "ran_at": "2026-08-29T16:01:00Z"
+    },
+    {
+      "command": "echo 'step 2' && ./run.sh --flag=value2",
+      "ran_at": "2026-08-29T16:02:00Z"
+    },
+    {
+      "command": "echo 'step 3' && ./run.sh --flag=value3",
+      "ran_at": "2026-08-29T16:03:00Z"
+    },
+    {
+      "command": "echo 'step 4' && ./run.sh --flag=value4",
+      "ran_at": "2026-08-29T16:04:00Z"
+    },
+    {
+      "command": "echo 'step 5' && ./run.sh --flag=value5",
+      "ran_at": "2026-08-29T16:05:00Z"
+    },
+    {
+      "command": "echo 'step 6' && ./run.sh --flag=value6",
+      "ran_at": "2026-08-29T16:06:00Z"
+    },
+    {
+      "command": "echo 'step 7' && ./run.sh --flag=value7",
+      "ran_at": "2026-08-29T16:07:00Z"
+    },
+    {
+      "command": "echo 'step 8' && ./run.sh --flag=value8",
+      "ran_at": "2026-08-29T16:08:00Z"
+    },
+    {
+      "command": "echo 'step 9' && ./run.sh --flag=value9",
+      "ran_at": "2026-08-29T16:09:00Z"
+    },
+    {
+      "command": "echo 'step 10' && ./run.sh --flag=value10",
+      "ran_at": "2026-08-29T16:10:00Z"
+    },
+    {
+      "command": "echo 'step 11' && ./run.sh --flag=value11",
+      "ran_at": "2026-08-29T16:11:00Z"
+    },
+    {
+      "command": "echo 'step 12' && ./run.sh --flag=value12",
+      "ran_at": "2026-08-29T16:12:00Z"
+    },
+    {
+      "command": "echo 'step 13' && ./run.sh --flag=value13",
+      "ran_at": "2026-08-29T16:13:00Z"
+    },
+    {
+      "command": "echo 'step 14' && ./run.sh --flag=value14",
+      "ran_at": "2026-08-29T16:14:00Z"
+    },
+    {
+      "command": "echo 'step 15' && ./run.sh --flag=value15",
+      "ran_at": "2026-08-29T16:15:00Z"
+    },
+    {
+      "command": "echo 'step 16' && ./run.sh --flag=value16",
+      "ran_at": "2026-08-29T16:16:00Z"
+    },
+    {
+      "command": "echo 'step 17' && ./run.sh --flag=value17",
+      "ran_at": "2026-08-29T16:17:00Z"
+    },
+    {
+      "command": "echo 'step 18' && ./run.sh --flag=value18",
+      "ran_at": "2026-08-29T16:18:00Z"
+    },
+    {
+      "command": "echo 'step 19' && ./run.sh --flag=value19",
+      "ran_at": "2026-08-29T16:19:00Z"
+    }
+  ],
+  "voice_note": {
+    "transcript": "テスト transcript with emoji 🎙️ and long text テスト transcript with emoji 🎙️ and long text テスト transcript with emoji 🎙️ and long text テスト transcript with emoji 🎙️ and long text テスト transcript with emoji 🎙️ and long text ",
+    "summary": "Summary text.",
+    "recorded_at": "2026-08-29T16:58:00Z"
+  },
+  "browser_tab": {
+    "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "title": "很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 ",
+    "captured_at": "2026-08-29T16:59:00Z"
+  }
+}
