@@ -124,8 +124,14 @@ HUMCON_LAST_HISTNUM=""
 HUMCON_PRIMED=""
 
 # Chain rather than clobber, so this coexists with anything else already hooked.
-if [[ -z ${PROMPT_COMMAND:-} ]]; then
-    PROMPT_COMMAND="__humcon_log_command"
-elif [[ $PROMPT_COMMAND != *__humcon_log_command* ]]; then
-    PROMPT_COMMAND="${PROMPT_COMMAND%;};__humcon_log_command"
+if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) =~ "declare -a" ]]; then
+    if [[ ! " ${PROMPT_COMMAND[*]} " =~ " __humcon_log_command " ]]; then
+        PROMPT_COMMAND+=(__humcon_log_command)
+    fi
+else
+    if [[ -z ${PROMPT_COMMAND:-} ]]; then
+        PROMPT_COMMAND="__humcon_log_command"
+    elif [[ $PROMPT_COMMAND != *__humcon_log_command* ]]; then
+        PROMPT_COMMAND="${PROMPT_COMMAND%;};__humcon_log_command"
+    fi
 fi

@@ -21,10 +21,13 @@ export interface VoiceNote {
   recorded_at: string | null;
 }
 
-export interface BrowserTab {
-  url: string | null;
+export interface BrowserTabEntry {
+  url: string;
   title: string | null;
-  captured_at: string | null;
+  /** Number of times the user has switched to this tab. */
+  frequency: number;
+  /** ISO-8601 UTC timestamp of the most recent activation. */
+  last_seen: string;
 }
 
 export interface Snapshot {
@@ -33,7 +36,8 @@ export interface Snapshot {
   active_window: ActiveWindow | null;
   recent_commands: RecentCommand[];
   voice_note: VoiceNote;
-  browser_tab: BrowserTab;
+  /** Sorted ascending by frequency (least-visited first). */
+  browser_tabs: BrowserTabEntry[];
 }
 
 // The schema version this UI was built against (architecture.md, frozen at
@@ -86,16 +90,21 @@ function normalizeVoiceNote(v: unknown): VoiceNote {
   };
 }
 
-function normalizeBrowserTab(v: unknown): BrowserTab {
-  if (v === null || typeof v !== "object") {
-    return { url: null, title: null, captured_at: null };
+function normalizeBrowserTabs(v: unknown): BrowserTabEntry[] {
+  if (!Array.isArray(v)) return [];
+  const out: BrowserTabEntry[] = [];
+  for (const item of v) {
+    if (item === null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.url !== "string" || !obj.url) continue;
+    out.push({
+      url: obj.url,
+      title: asString(obj.title),
+      frequency: typeof obj.frequency === "number" ? obj.frequency : 0,
+      last_seen: asNonNullString(obj.last_seen, ""),
+    });
   }
-  const obj = v as Record<string, unknown>;
-  return {
-    url: asString(obj.url),
-    title: asString(obj.title),
-    captured_at: asString(obj.captured_at),
-  };
+  return out;
 }
 
 // Turns arbitrary parsed JSON into a fully-shaped `Snapshot`, tolerating
@@ -111,7 +120,7 @@ export function normalizeSnapshot(raw: unknown): Snapshot {
     active_window: normalizeActiveWindow(obj.active_window),
     recent_commands: normalizeRecentCommands(obj.recent_commands),
     voice_note: normalizeVoiceNote(obj.voice_note),
-    browser_tab: normalizeBrowserTab(obj.browser_tab),
+    browser_tabs: normalizeBrowserTabs(obj.browser_tabs),
   };
 }
 

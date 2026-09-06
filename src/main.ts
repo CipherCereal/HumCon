@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseSnapshot, Snapshot } from "./snapshot";
-import { renderCard, renderRefreshError, clearRefreshError } from "./card";
+import {
+  renderCard,
+  updateHeaderMeta,
+  updateVoiceRecordingState,
+  renderRefreshError,
+  clearRefreshError,
+} from "./card";
 
-const POLL_MS = 1000;
+const POLL_MS = 250;
 
 // Dev-only escape hatch: `?fixture=<name>` loads a checked-in fixture from
 // src/fixtures/ instead of invoking Tauri, so the parse/normalize/render
@@ -25,7 +31,41 @@ async function readSnapshotText(): Promise<string> {
 }
 
 let lastGood: Snapshot | null = null;
+let lastRawText: string | null = null;
 let refreshing = false;
+let isRecording = false;
+
+async function checkIsRecording(): Promise<boolean> {
+  if (fixtureName()) return isRecording;
+  try {
+    return await invoke<boolean>("is_voice_recording");
+  } catch {
+    return false;
+  }
+}
+
+async function handleToggleVoice(root: HTMLElement) {
+  if (fixtureName()) {
+    isRecording = !isRecording;
+    updateVoiceRecordingState(root, isRecording);
+    return;
+  }
+
+  try {
+    // Optimistic UI flip for instantaneous feedback
+    isRecording = !isRecording;
+    updateVoiceRecordingState(root, isRecording);
+
+    // Invoke backend toggle
+    const actual = await invoke<boolean>("toggle_voice_recording");
+    isRecording = actual;
+    updateVoiceRecordingState(root, isRecording);
+  } catch (err) {
+    console.error("[voice_note] failed to toggle recording:", err);
+    isRecording = await checkIsRecording();
+    updateVoiceRecordingState(root, isRecording);
+  }
+}
 
 async function refresh(root: HTMLElement) {
   // Guards against a slow read overlapping the next tick — reads are cheap
@@ -35,9 +75,30 @@ async function refresh(root: HTMLElement) {
   refreshing = true;
   try {
     const text = await readSnapshotText();
+    const now = new Date();
+
+    // Query recording state to stay in sync with the Ctrl+Alt+Space global shortcut
+    const rec = await checkIsRecording();
+    if (rec !== isRecording) {
+      isRecording = rec;
+      updateVoiceRecordingState(root, isRecording);
+    }
+
+    // If the snapshot text hasn't changed and the DOM is already populated,
+    // only update the header's relative timestamp and stale badge in-place.
+    // This avoids tearing down DOM sections on every tick, completely
+    // eliminating scroll resets and interaction glitches.
+    if (text === lastRawText && lastGood && root.children.length > 0) {
+      updateHeaderMeta(root, lastGood, now);
+      updateVoiceRecordingState(root, isRecording);
+      clearRefreshError(root);
+      return;
+    }
+
     const snapshot = parseSnapshot(text);
     lastGood = snapshot;
-    renderCard(root, snapshot, new Date());
+    lastRawText = text;
+    renderCard(root, snapshot, now, isRecording, () => void handleToggleVoice(root));
     clearRefreshError(root);
   } catch (err) {
     // A transient Windows sharing violation against the writer's atomic

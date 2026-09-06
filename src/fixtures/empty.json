@@ -4,5 +4,5 @@
   "active_window": null,
   "recent_commands": [],
   "voice_note": { "transcript": null, "summary": null, "recorded_at": null },
-  "browser_tab": { "url": null, "title": null, "captured_at": null }
+  "browser_tabs": []
 }

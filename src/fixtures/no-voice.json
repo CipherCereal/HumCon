@@ -10,5 +10,5 @@
     { "command": "git status", "ran_at": "2026-08-29T17:04:30Z" }
   ],
   "voice_note": { "transcript": null, "summary": null, "recorded_at": null },
-  "browser_tab": { "url": null, "title": null, "captured_at": null }
+  "browser_tabs": []
 }

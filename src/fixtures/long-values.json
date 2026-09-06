@@ -93,9 +93,12 @@
     "summary": "Summary text.",
     "recorded_at": "2026-08-29T16:58:00Z"
   },
-  "browser_tab": {
-    "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "title": "很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 ",
-    "captured_at": "2026-08-29T16:59:00Z"
-  }
+  "browser_tabs": [
+    {
+      "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "title": "很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 很长的标题 ",
+      "frequency": 12,
+      "last_seen": "2026-08-29T16:59:00Z"
+    }
+  ]
 }

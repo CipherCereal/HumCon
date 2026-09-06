@@ -4,10 +4,17 @@
 //! in Sessions 1-5 defines how one would reach it — this module and the
 //! extension define that contract together (architecture.md, Session 6).
 //!
-//! The extension `POST`s `{"url": "...", "title": "..."}` to `/tab`; this
-//! module writes it into `snapshot.json`'s `browser_tab` key through the same
-//! shared `SnapshotStore` every other producer uses, so Session 0's
-//! single-mutex rule holds with no second writer.
+//! Session 7 overhauled the contract: `browser_tab` (single object) is
+//! replaced by `browser_tabs` (Vec), and this server now accumulates a
+//! per-URL frequency counter. On every tab switch:
+//!   1. The URL's entry (keyed by URL) gets its `frequency` incremented and
+//!      its `last_seen` updated.
+//!   2. Entries older than 1 hour are pruned.
+//!   3. The remaining entries are sorted ascending by frequency (least-visited
+//!      first, most-visited last) and written to `snapshot.browser_tabs`.
+//!
+//! The extension's POST body is unchanged — still `{url, title}` — so no
+//! extension update is needed for the schema change.
 //!
 //! `tiny_http` rather than `axum`/`warp`: those pull in an async runtime, and
 //! this codebase has consistently chosen blocking work on its own thread
@@ -28,17 +35,19 @@
 //!
 //! Not defended against: another **local process**, which can trivially send
 //! the header too. Accepted for a first pass — the blast radius is a wrong
-//! `browser_tab` in a local file, not a leak. A shared token would close that
+//! `browser_tabs` in a local file, not a leak. A shared token would close that
 //! gap but was declined as setup friction (see the plan).
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
 use std::thread;
 
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::snapshot::{now_iso8601, BrowserTab, SnapshotStore};
+use crate::snapshot::{BrowserTabEntry, SnapshotStore};
 
 /// Header every legitimate request must carry. Its mere presence, not its
 /// value, is what matters — see the module doc for why that's enough to stop
@@ -49,6 +58,9 @@ const EXTENSION_HEADER: &str = "X-HumCon-Extension";
 /// tab's URL and title are a few hundred bytes at most; this leaves generous
 /// headroom without letting a malformed or hostile client allocate freely.
 const MAX_BODY_BYTES: u64 = 8 * 1024;
+
+/// Tabs not seen for longer than this are pruned from the tracked set.
+const MAX_IDLE_SECS: i64 = 3600; // 1 hour
 
 /// Start the receiver on its own thread and return immediately.
 ///
@@ -76,24 +88,29 @@ fn run(store: &SnapshotStore, port: u16) {
     };
     println!("[browser] listening on http://127.0.0.1:{port} for the browser extension");
 
-    // The last update actually written, kept outside the snapshot itself —
-    // same shape as command_log.rs's `last_written`. `incoming_requests()`
-    // processes one request at a time on this single thread, so a plain local
-    // variable is enough; no lock needed. Comparing against this (rather than
-    // reading `snapshot.browser_tab` back out) means a duplicate event skips
-    // `store.update` entirely, since `SnapshotStore::update` unconditionally
-    // stamps `last_updated` and writes the file even when the edit closure
-    // changes nothing — architecture.md's Session 2 note ("prefer
-    // change-detection over unconditional writes") means skipping the call,
-    // not just skipping the field assignment inside it.
-    let mut last_sent: Option<TabUpdate> = None;
+    // In-memory tab store: URL → entry. Kept on this thread so no lock is
+    // needed — `incoming_requests()` processes one request at a time.
+    let mut tab_map: HashMap<String, TabState> = HashMap::new();
 
     for request in server.incoming_requests() {
-        handle_request(store, request, &mut last_sent);
+        handle_request(store, request, &mut tab_map);
     }
 }
 
-fn handle_request(store: &SnapshotStore, mut request: Request, last_sent: &mut Option<TabUpdate>) {
+/// Per-URL state kept in the in-memory map. Differs from `BrowserTabEntry`
+/// only in that `last_seen` is stored as a parsed `DateTime` here for cheap
+/// age comparisons, rather than as an ISO-8601 string.
+struct TabState {
+    title: Option<String>,
+    frequency: u32,
+    last_seen: DateTime<Utc>,
+}
+
+fn handle_request(
+    store: &SnapshotStore,
+    mut request: Request,
+    tab_map: &mut HashMap<String, TabState>,
+) {
     // OPTIONS (the CORS preflight) is answered with no CORS headers at all —
     // see the module doc. This must come before the method/path check below,
     // since a preflight targets the real method (POST) but arrives as OPTIONS.
@@ -137,20 +154,20 @@ fn handle_request(store: &SnapshotStore, mut request: Request, last_sent: &mut O
         }
         Ok(_) => match parse_tab_request(&body) {
             Ok(update) => {
-                if should_write(last_sent.as_ref(), &update) {
-                    if let Err(err) = store.update(|snapshot| {
-                        snapshot.browser_tab = BrowserTab {
-                            url: Some(update.url.clone()),
-                            title: update.title.clone(),
-                            captured_at: Some(now_iso8601()),
-                        };
-                    }) {
-                        eprintln!("[browser] could not write snapshot: {err}");
-                    } else {
-                        println!("[browser] tab -> snapshot");
-                        *last_sent = Some(update);
-                    }
+                let entries = record_tab_switch(tab_map, update.url.clone(), update.title.clone(), Utc::now());
+
+                if let Err(err) = store.update(|snapshot| {
+                    snapshot.browser_tabs = entries;
+                }) {
+                    eprintln!("[browser] could not write snapshot: {err}");
+                } else {
+                    println!(
+                        "[browser] tab switch → {} (freq {})",
+                        update.url,
+                        tab_map.get(&update.url).map_or(0, |s| s.frequency)
+                    );
                 }
+
                 let _ = request.respond(Response::empty(204));
             }
             Err(err) => {
@@ -159,6 +176,41 @@ fn handle_request(store: &SnapshotStore, mut request: Request, last_sent: &mut O
             }
         },
     }
+}
+
+/// Updates tab map with the incoming switch, prunes entries older than 1 hour,
+/// and returns the entries sorted ascending by frequency.
+fn record_tab_switch(
+    tab_map: &mut HashMap<String, TabState>,
+    url: String,
+    title: Option<String>,
+    now: DateTime<Utc>,
+) -> Vec<BrowserTabEntry> {
+    let entry = tab_map.entry(url).or_insert(TabState {
+        title: title.clone(),
+        frequency: 0,
+        last_seen: now,
+    });
+    entry.frequency += 1;
+    entry.last_seen = now;
+    if title.is_some() {
+        entry.title = title;
+    }
+
+    let cutoff = now - Duration::seconds(MAX_IDLE_SECS);
+    tab_map.retain(|_, v| v.last_seen > cutoff);
+
+    let mut entries: Vec<BrowserTabEntry> = tab_map
+        .iter()
+        .map(|(url, state)| BrowserTabEntry {
+            url: url.clone(),
+            title: state.title.clone(),
+            frequency: state.frequency,
+            last_seen: state.last_seen.to_rfc3339(),
+        })
+        .collect();
+    entries.sort_by_key(|e| e.frequency);
+    entries
 }
 
 fn has_required_header(headers: &[Header]) -> bool {
@@ -229,19 +281,6 @@ fn parse_tab_request(body: &str) -> Result<TabUpdate, TabError> {
         url: url.to_string(),
         title,
     })
-}
-
-/// Whether `incoming` actually differs from the last update we sent.
-///
-/// architecture.md's Session 2 note is explicit: "prefer change-detection
-/// over unconditional writes in any new component" — two pollers already
-/// rewrite the whole file every 2-3s, and a page that fires repeated
-/// `tabs.onUpdated` events for one navigation shouldn't add a write per event
-/// on top of that. Compared against `last_sent` (see `run`) rather than the
-/// live snapshot, since `SnapshotStore::update` always writes once called —
-/// the point is to skip calling it at all for a duplicate.
-fn should_write(last_sent: Option<&TabUpdate>, incoming: &TabUpdate) -> bool {
-    last_sent != Some(incoming)
 }
 
 #[cfg(test)]
@@ -329,39 +368,44 @@ mod tests {
         assert_eq!(update.title.as_deref(), Some("hi"));
     }
 
-    fn update(url: &str, title: Option<&str>) -> TabUpdate {
-        TabUpdate {
-            url: url.to_string(),
-            title: title.map(str::to_string),
-        }
+    #[test]
+    fn tab_frequency_and_ascending_sort_order() {
+        let mut map = HashMap::new();
+        let now = Utc::now();
+
+        // Switch to Tab A 3 times, Tab B 1 time, Tab C 2 times
+        record_tab_switch(&mut map, "https://a.com".into(), Some("A".into()), now);
+        record_tab_switch(&mut map, "https://a.com".into(), Some("A".into()), now);
+        record_tab_switch(&mut map, "https://a.com".into(), Some("A".into()), now);
+        record_tab_switch(&mut map, "https://b.com".into(), Some("B".into()), now);
+        record_tab_switch(&mut map, "https://c.com".into(), Some("C".into()), now);
+        let entries = record_tab_switch(&mut map, "https://c.com".into(), Some("C".into()), now);
+
+        assert_eq!(entries.len(), 3);
+        // Ascending by frequency: B (1), C (2), A (3)
+        assert_eq!(entries[0].url, "https://b.com");
+        assert_eq!(entries[0].frequency, 1);
+        assert_eq!(entries[1].url, "https://c.com");
+        assert_eq!(entries[1].frequency, 2);
+        assert_eq!(entries[2].url, "https://a.com");
+        assert_eq!(entries[2].frequency, 3);
     }
 
     #[test]
-    fn first_ever_update_should_write() {
-        assert!(should_write(None, &update("https://a.com", None)));
-    }
+    fn tabs_idle_over_one_hour_are_pruned() {
+        let mut map = HashMap::new();
+        let t0 = Utc::now();
 
-    #[test]
-    fn identical_update_should_not_write() {
-        let last = update("https://a.com", Some("A"));
-        assert!(!should_write(Some(&last), &update("https://a.com", Some("A"))));
-    }
+        record_tab_switch(&mut map, "https://old.com".into(), Some("Old".into()), t0);
+        assert_eq!(map.len(), 1);
 
-    #[test]
-    fn changed_url_should_write() {
-        let last = update("https://a.com", Some("A"));
-        assert!(should_write(Some(&last), &update("https://b.com", Some("A"))));
-    }
+        // Advance time by 3601 seconds (> 1 hour)
+        let t1 = t0 + Duration::seconds(3601);
+        let entries = record_tab_switch(&mut map, "https://new.com".into(), Some("New".into()), t1);
 
-    #[test]
-    fn changed_title_same_url_should_write() {
-        let last = update("https://a.com", Some("A"));
-        assert!(should_write(Some(&last), &update("https://a.com", Some("A2"))));
-    }
-
-    #[test]
-    fn title_becoming_none_should_write() {
-        let last = update("https://a.com", Some("A"));
-        assert!(should_write(Some(&last), &update("https://a.com", None)));
+        // Old tab must be pruned, only new tab remains
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url, "https://new.com");
+        assert_eq!(entries[0].frequency, 1);
     }
 }

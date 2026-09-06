@@ -14,61 +14,71 @@ const ENDPOINT = "http://127.0.0.1:7423/tab";
 
 // Coalesces the burst of tabs.onUpdated events a single page load fires
 // (loading -> title set -> complete) into one POST.
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = 150;
 
-let lastSent = null; // { url, title } most recently POSTed, for the dedupe below
+let lastSent = null; // { url, title } most recently POSTed
 let debounceTimer = null;
 
-function report(tab) {
+function sendTab(url, title) {
+  lastSent = { url, title };
+  fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-HumCon-Extension": "1",
+    },
+    body: JSON.stringify({ url, title }),
+  }).catch(() => {
+    // App not running is normal, silent catch
+  });
+}
+
+function report(tab, immediate = false) {
   if (!tab || !tab.url || !shouldReport(tab.url)) return;
 
   const title = tab.title || null;
   if (lastSent && lastSent.url === tab.url && lastSent.title === title) {
-    return; // nothing actually changed since the last report
+    return; // identical to last report
   }
 
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    lastSent = { url: tab.url, title };
-    fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Presence, not value, is what the server checks — see
-        // browser_server.rs's module doc for why that's enough to block a
-        // web page without needing a shared secret.
-        "X-HumCon-Extension": "1",
-      },
-      body: JSON.stringify({ url: tab.url, title }),
-    }).catch(() => {
-      // The Tauri app simply not running is the normal case here, not an
-      // error worth logging on every tab switch.
-    });
-  }, DEBOUNCE_MS);
+
+  if (immediate) {
+    sendTab(tab.url, title);
+  } else {
+    debounceTimer = setTimeout(() => {
+      sendTab(tab.url, title);
+    }, DEBOUNCE_MS);
+  }
 }
 
-function reportActiveTabInWindow(windowId) {
-  chrome.tabs.query({ active: true, windowId }, (tabs) => report(tabs[0]));
+function reportActiveTabInWindow(windowId, immediate = false) {
+  chrome.tabs.query({ active: true, windowId }, (tabs) => {
+    if (tabs && tabs[0]) report(tabs[0], immediate);
+  });
 }
 
-// Switching to a different tab.
+// Switching to a different tab — user action, report immediately.
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  chrome.tabs.get(tabId, report);
+  chrome.tabs.get(tabId, (tab) => report(tab, true));
 });
 
 // In-place navigation and late-arriving titles on the already-active tab.
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (!tab.active) return;
   if (changeInfo.status === "complete" || changeInfo.title) {
-    report(tab);
+    report(tab, false);
   }
 });
 
-// Switching browser windows. WINDOW_ID_NONE means focus left the browser
-// entirely (e.g. to another app) — deliberately not reported, so browser_tab
-// keeps showing the last real tab rather than being cleared, matching how
-// active_window treats a failed poll as "skip", not "erase".
+// Switching browser windows — report immediately.
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
-  reportActiveTabInWindow(windowId);
+  reportActiveTabInWindow(windowId, true);
 });
+
+// Report currently active tab on extension startup / wake-up.
+chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+  if (tabs && tabs[0]) report(tabs[0], true);
+});
+

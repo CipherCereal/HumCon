@@ -205,16 +205,24 @@ pub struct VoiceNoteController {
 }
 
 impl VoiceNoteController {
-    /// One hotkey press. Starts a recording when idle, stops and transcribes
-    /// one when recording.
+    /// Returns whether a recording is currently active.
+    pub fn is_recording(&self) -> bool {
+        self.recording
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+    }
+
+    /// One toggle action (via hotkey or UI button). Starts a recording when idle,
+    /// stops and transcribes one when recording. Returns `true` if recording is now active.
     ///
     /// The transcription leg runs on its own thread: whisper.cpp takes seconds
     /// on a real recording, and this is called from the global-shortcut
-    /// handler, which must return promptly.
-    fn toggle(self: Arc<Self>) {
+    /// handler or frontend invoke, which must return promptly.
+    pub fn toggle(self: &Arc<Self>) -> bool {
         // Decide and mutate under the lock, but never hold it across the join
         // or the whisper.cpp call.
-        let stopping = {
+        let (stopping, is_active) = {
             let mut guard = self
                 .recording
                 .lock()
@@ -224,29 +232,34 @@ impl VoiceNoteController {
                 // Was recording → this press stops it. Taking it above already
                 // put us back in the idle state, so a stray press during
                 // transcription starts a fresh recording rather than wedging.
-                Some(active) => Some(active),
+                Some(active) => (Some(active), false),
                 // Was idle → this press starts a recording.
                 None => {
                     match start_recording(&self.config.wav) {
                         Ok(active) => {
                             *guard = Some(active);
-                            println!("[voice_note] recording started — press {HOTKEY} again to stop");
+                            println!("[voice_note] recording started — press {HOTKEY} or button to stop");
+                            (None, true)
                         }
-                        Err(err) => eprintln!("[voice_note] {err}"),
+                        Err(err) => {
+                            eprintln!("[voice_note] {err}");
+                            (None, false)
+                        }
                     }
-                    None
                 }
             }
         };
 
         if let Some(active) = stopping {
             println!("[voice_note] recording stopped, transcribing…");
-            let this = Arc::clone(&self);
+            let this = Arc::clone(self);
             thread::Builder::new()
                 .name("humcon-voice-note".into())
                 .spawn(move || this.finish(active))
                 .expect("failed to spawn voice note thread");
         }
+
+        is_active
     }
 
     /// Stop the recorder, transcribe what it captured, and hand the transcript
@@ -328,7 +341,7 @@ fn deliver(store: &Arc<SnapshotStore>, transcript: Option<String>) {
 ///
 /// Hotkey registration failing (usually another app already owns the combo) is
 /// also non-fatal — the rest of the app is useful without a voice note.
-pub fn register(app: &tauri::App, store: Arc<SnapshotStore>, config: WhisperConfig) {
+pub fn register(app: &tauri::App, store: Arc<SnapshotStore>, config: WhisperConfig) -> Arc<VoiceNoteController> {
     if !config.bin.exists() {
         eprintln!(
             "[voice_note] whisper-cli.exe not found at {} — recording will work, \
@@ -350,13 +363,14 @@ pub fn register(app: &tauri::App, store: Arc<SnapshotStore>, config: WhisperConf
         store,
     });
 
+    let controller_for_hotkey = Arc::clone(&controller);
     let result = app
         .global_shortcut()
         .on_shortcut(HOTKEY, move |_app, _shortcut, event| {
             // Fire on press only. Acting on both press and release would
             // start and immediately stop the recording on a single tap.
             if event.state == ShortcutState::Pressed {
-                Arc::clone(&controller).toggle();
+                controller_for_hotkey.toggle();
             }
         });
 
@@ -367,6 +381,8 @@ pub fn register(app: &tauri::App, store: Arc<SnapshotStore>, config: WhisperConf
              probably owns it. Voice notes are disabled this run."
         ),
     }
+
+    controller
 }
 
 // ---------------------------------------------------------------------------

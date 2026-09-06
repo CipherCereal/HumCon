@@ -31,11 +31,14 @@ Status: **FROZEN as of Session 0 (2026-08-29).** Any later change is a deliberat
     "summary": "string | null",
     "recorded_at": "ISO-8601 timestamp | null"
   },
-  "browser_tab": {
-    "url": "string | null",
-    "title": "string | null",
-    "captured_at": "ISO-8601 timestamp | null"
-  }
+  "browser_tabs": [
+    {
+      "url": "string",
+      "title": "string | null",
+      "frequency": "number",
+      "last_seen": "ISO-8601 timestamp"
+    }
+  ]
 }
 ```
 
@@ -191,6 +194,12 @@ Add one entry per session: date, component, what got done, cost from /usage, wha
   - **Resume card resilience path (old item 6) — done, PASS, verified visually.** Method: app run against a scratch state dir (`WSLENV=HUMCON_DIR` override, confirmed from the app's own `[snapshot] using ...` startup line; real `.humcon` untouched and verified intact after). Sustained failure induced by replacing `snapshot.json` with a same-named directory (reads fail with os error 5; the writers' rename-over-directory fails non-fatally), held ~23 s across four screenshots: baseline normal → "Couldn't refresh — showing last known state." banner with last-good render kept → still stable at 20 s, process alive and responding → after `rmdir`, a writer recreated the file in ~3 s, banner cleared, freshness text updating. Writer logs were exactly as designed: one bounded error line for the whole window (`consecutive failure #1`) plus one recovery line (`recovered after 7 consecutive failure(s)`). One cosmetic finding: the banner doesn't wrap and clips at the right edge (Next steps item 5). Teardown verified clean twice: no leftover processes, port 1420 free, scratch dir deleted.
   - **Verified:** 66/66 tests; secret scans on both repos' staged content; every claim above comes from the executing agent's report with screenshot/log evidence, not assumption.
   - What's left: the API-key success run, the GitHub push (both blocked on the user), the `SearchHost` product call (deliberately the user's decision), the local-model toggle, and the banner-wrap cosmetic — all in Next steps.
+
+- **2026-09-06 — Session 7: Scroll fix, real-time command logging, minimalist dark redesign & browser tab overhaul.**
+  - **Scroll bug fixed:** `src/card.ts` preserves and restores commands list `scrollTop` and `window.scrollY`. `src/main.ts` added `lastRawText` tracking and fast metadata updates without DOM teardown. Polling interval tightened to 250ms.
+  - **Real-time command capture:** `src-tauri/src/command_log.rs` now tails PowerShell history (`ConsoleHost_history.txt`) as well as `commands.jsonl` every 250ms. Added `hooks/humcon-log.ps1` for native PowerShell prompt hook.
+  - **Minimalist dark grainy redesign:** Obsidian `#08080a` base with SVG `feTurbulence` noise grain overlay, status dot indicator, click-to-copy commands with relative timestamps.
+  - **Browser tab feature overhaul (schema change):** Replaced single-object `browser_tab` with `browser_tabs: Vec<BrowserTabEntry>`. Tracks tab switch frequency and last-visited timestamp. Prunes tabs idle > 1 hour. Sorts entries ascending by frequency. `background.js` updated to immediately report tab activations and startup active tab. Updated TypeScript interfaces (`snapshot.ts`), UI list rendering with frequency badge (`card.ts`), styles (`styles.css`), all fixtures, and unit tests (65/65 passing).
 
 ## Known limitations
 - **whisper hallucinates on near-silent input.** Digitally-pure silence transcribed as `"you"`. Realistic faint room noise correctly yields `[BLANK_AUDIO]`, which `clean_transcript` filters to `""`, so the common case is handled — but a short spurious word can still reach `voice_note.transcript` from a quiet recording. Not filterable by heuristic without also dropping genuine one-word notes.

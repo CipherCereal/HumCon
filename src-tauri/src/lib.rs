@@ -33,6 +33,23 @@ async fn read_snapshot_raw(store: State<'_, Arc<SnapshotStore>>) -> Result<Strin
     std::fs::read_to_string(store.path()).map_err(|e| e.to_string())
 }
 
+/// Toggles voice recording on/off, matching the behavior of the Ctrl+Alt+Space hotkey.
+/// Returns `true` if recording is now in progress, or `false` if stopped.
+#[tauri::command]
+async fn toggle_voice_recording(
+    controller: State<'_, Arc<voice_note::VoiceNoteController>>,
+) -> Result<bool, String> {
+    Ok(controller.inner().toggle())
+}
+
+/// Checks whether voice recording is currently active.
+#[tauri::command]
+async fn is_voice_recording(
+    controller: State<'_, Arc<voice_note::VoiceNoteController>>,
+) -> Result<bool, String> {
+    Ok(controller.is_recording())
+}
+
 /// Directory holding HumCon's runtime state: `snapshot.json` and the shell
 /// hook's `commands.jsonl`.
 ///
@@ -105,7 +122,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![read_snapshot_raw])
+        .invoke_handler(tauri::generate_handler![
+            read_snapshot_raw,
+            toggle_voice_recording,
+            is_voice_recording
+        ])
         .setup(|app| {
             let snapshot_file = snapshot_path(app);
             let command_log_file = command_log_path(app);
@@ -123,13 +144,13 @@ pub fn run() {
             browser_server::spawn(Arc::clone(&store), browser_port(app));
 
             // Event-driven rather than a polling thread: this one only does
-            // work when the hotkey is pressed, so it adds no snapshot churn.
-            voice_note::register(app, Arc::clone(&store), whisper);
+            // work when the hotkey or UI button is toggled, so it adds no snapshot churn.
+            let voice_controller = voice_note::register(app, Arc::clone(&store), whisper);
 
-            // Keep the store alive and reachable: read_snapshot_raw (above) uses
-            // it to resolve the resume card UI's read path, and it's how any
-            // future component would reach the shared writer.
+            // Keep the store and voice controller alive and reachable:
+            // read_snapshot_raw and toggle_voice_recording use them.
             app.manage(store);
+            app.manage(voice_controller);
 
             Ok(())
         })

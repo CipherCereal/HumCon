@@ -16,9 +16,18 @@
     "summary": "Verify the schema version banner before shipping.",
     "recorded_at": "2026-08-29T17:18:00Z"
   },
-  "browser_tab": {
-    "url": "https://tauri.app/develop/calling-rust/",
-    "title": "Calling Rust from the Frontend — Tauri",
-    "captured_at": "2026-08-29T17:19:00Z"
-  }
+  "browser_tabs": [
+    {
+      "url": "https://github.com/tauri-apps/tauri",
+      "title": "tauri-apps/tauri: Build smaller, faster, and more secure desktop applications with a web frontend.",
+      "frequency": 2,
+      "last_seen": "2026-08-29T17:15:00Z"
+    },
+    {
+      "url": "https://tauri.app/develop/calling-rust/",
+      "title": "Calling Rust from the Frontend — Tauri",
+      "frequency": 5,
+      "last_seen": "2026-08-29T17:19:00Z"
+    }
+  ]
 }

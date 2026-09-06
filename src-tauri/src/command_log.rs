@@ -14,17 +14,19 @@
 //! going through the same shared writer as every other component — is what
 //! actually touches the snapshot.
 
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
+
 use crate::snapshot::{RecentCommand, SnapshotStore};
 
 /// How often to check the log for new commands.
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Session 0's frozen decision: keep the last 20, dropping oldest first.
 const MAX_RECENT_COMMANDS: usize = 20;
@@ -32,6 +34,107 @@ const MAX_RECENT_COMMANDS: usize = 20;
 /// Failures between repeat reports, mirroring `window_capture` so a broken log
 /// path can't produce an error line on every single poll.
 const READ_FAILURE_REPEAT: u32 = 150;
+
+const MAX_LOG_BYTES: u64 = 65536;
+const LOG_KEEP_LINES: usize = 100;
+
+/// Resolves PowerShell's PSReadLine history file path on Windows.
+fn powershell_history_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|appdata| {
+        PathBuf::from(appdata)
+            .join("Microsoft")
+            .join("Windows")
+            .join("PowerShell")
+            .join("PSReadLine")
+            .join("ConsoleHost_history.txt")
+    })
+}
+
+/// Checks if a command matches secret-like patterns and should not be logged.
+pub fn is_secret_command(cmd: &str) -> bool {
+    let lower = cmd.to_ascii_lowercase();
+    const PATTERNS: &[&str] = &[
+        "password",
+        "passwd",
+        "passphrase",
+        "secret",
+        "token",
+        "apikey",
+        "api_key",
+        "api-key",
+        "bearer",
+        "credential",
+        "private_key",
+        "private-key",
+        "--password=",
+        "ssh-add",
+    ];
+
+    for pat in PATTERNS {
+        if lower.contains(pat) {
+            return true;
+        }
+    }
+    false
+}
+
+fn append_command_to_log(log_path: &Path, cmd: &str) -> io::Result<()> {
+    if let Some(parent) = log_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let entry = RecentCommand {
+        command: cmd.to_string(),
+        ran_at: crate::snapshot::now_iso8601(),
+    };
+    let json_line = serde_json::to_string(&entry)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    writeln!(file, "{}", json_line)?;
+    file.flush()?;
+
+    // Keep log bounded to ~64KB
+    if let Ok(metadata) = fs::metadata(log_path) {
+        if metadata.len() > MAX_LOG_BYTES {
+            if let Ok(content) = fs::read_to_string(log_path) {
+                let lines: Vec<&str> = content.lines().collect();
+                if lines.len() > LOG_KEEP_LINES {
+                    let keep_from = lines.len() - LOG_KEEP_LINES;
+                    let trimmed = lines[keep_from..].join("\n") + "\n";
+                    let _ = fs::write(log_path, trimmed);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn read_new_ps_commands(ps_path: &Path, last_line_count: &mut usize) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(ps_path) else {
+        return Vec::new();
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total <= *last_line_count {
+        *last_line_count = total;
+        return Vec::new();
+    }
+
+    let new_entries: Vec<String> = lines[*last_line_count..]
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !is_secret_command(s))
+        .map(|s| s.to_string())
+        .collect();
+
+    *last_line_count = total;
+    new_entries
+}
 
 /// Start the reader on its own thread and return immediately.
 pub fn spawn(store: Arc<SnapshotStore>, log_path: PathBuf) -> thread::JoinHandle<()> {
@@ -46,16 +149,54 @@ fn run(store: &SnapshotStore, log_path: &Path) {
     let mut last_written: Vec<RecentCommand> = Vec::new();
     let mut consecutive_read_failures: u32 = 0;
 
+    let ps_history = powershell_history_path();
+    let mut last_ps_lines = if let Some(ref ps_path) = ps_history {
+        fs::read_to_string(ps_path)
+            .map(|c| c.lines().count())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    // If commands.jsonl is absent or empty, seed the tail of PS history
+    if (!log_path.exists() || fs::metadata(log_path).map(|m| m.len() == 0).unwrap_or(true))
+        && last_ps_lines > 0
+    {
+        if let Some(ref ps_path) = ps_history {
+            if let Ok(content) = fs::read_to_string(ps_path) {
+                let lines: Vec<&str> = content.lines().collect();
+                let seed_start = lines.len().saturating_sub(MAX_RECENT_COMMANDS);
+                for line in &lines[seed_start..] {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() && !is_secret_command(trimmed) {
+                        let _ = append_command_to_log(log_path, trimmed);
+                    }
+                }
+            }
+        }
+    }
+
     loop {
-        // Deliberately re-read every poll rather than gating on fs::metadata's
-        // (mtime, len). That gate was tried first and *silently stopped
-        // firing* partway through a soak test: the log is appended from WSL
-        // through the 9p server onto NTFS, and Windows directory-entry
-        // metadata can lag behind the file's real size while another process
-        // holds the handle. Stale metadata meant "no change" and the component
-        // quietly stopped updating. The log is bounded to ~64 KB by the hook,
-        // so reading it every couple of seconds is far cheaper than a class of
-        // bug that looks exactly like the feature not working.
+        // Automatically tail commands from PowerShell history
+        if let Some(ref ps_path) = ps_history {
+            let new_cmds = read_new_ps_commands(ps_path, &mut last_ps_lines);
+            for cmd in new_cmds {
+                let already_logged_recently = last_written.last().map_or(false, |last| {
+                    if last.command == cmd {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(&last.ran_at) {
+                            return Utc::now().signed_duration_since(dt).num_seconds() < 2;
+                        }
+                    }
+                    false
+                });
+
+                if !already_logged_recently {
+                    let _ = append_command_to_log(log_path, &cmd);
+                }
+            }
+        }
+
+        // Re-read commands.jsonl every poll
         match fs::read_to_string(log_path) {
             Ok(text) => {
                 if consecutive_read_failures > 0 {
@@ -86,8 +227,8 @@ fn run(store: &SnapshotStore, log_path: &Path) {
                 }
             }
 
-            // A missing log is the normal state before the hook has ever been
-            // sourced — leave `recent_commands` at `[]` and stay quiet.
+            // A missing log is the normal state before any hook has run —
+            // leave `recent_commands` at `[]` and stay quiet.
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
 
             Err(err) => {
@@ -222,5 +363,52 @@ mod tests {
         let got = parse_log(&text);
         assert_eq!(got.len(), 2);
         assert_eq!(got[1].command, "two");
+    }
+
+    #[test]
+    fn secret_commands_are_classified_correctly() {
+        assert!(is_secret_command("export API_KEY=12345"));
+        assert!(is_secret_command("mysql --password=secret"));
+        assert!(is_secret_command("curl -H 'Authorization: Bearer token123'"));
+        assert!(is_secret_command("ssh-add ~/.ssh/id_rsa"));
+        assert!(is_secret_command("cat ~/.secret.env"));
+        assert!(!is_secret_command("git status"));
+        assert!(!is_secret_command("npm run tauri dev"));
+        assert!(!is_secret_command("cargo test"));
+    }
+
+    #[test]
+    fn read_new_ps_commands_only_yields_new_non_secret_lines() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let ps_file = temp_dir.path().join("ConsoleHost_history.txt");
+
+        fs::write(
+            &ps_file,
+            "git status\nexport API_KEY=123\n\nnpm run dev\n",
+        )
+        .expect("write ps history");
+
+        let mut line_count = 0;
+        let first_read = read_new_ps_commands(&ps_file, &mut line_count);
+        assert_eq!(first_read, vec!["git status", "npm run dev"]);
+        assert_eq!(line_count, 4);
+
+        // Subsequent read with no changes yields nothing
+        let second_read = read_new_ps_commands(&ps_file, &mut line_count);
+        assert!(second_read.is_empty());
+
+        // Appending new lines
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .open(&ps_file)
+            .expect("open ps history");
+        writeln!(f, "cargo build").expect("write line");
+        writeln!(f, "ssh-add key").expect("write line");
+        writeln!(f, "cargo test").expect("write line");
+
+        let third_read = read_new_ps_commands(&ps_file, &mut line_count);
+        assert_eq!(third_read, vec!["cargo build", "cargo test"]);
+        assert_eq!(line_count, 7);
     }
 }

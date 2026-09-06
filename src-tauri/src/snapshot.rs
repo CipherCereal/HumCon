@@ -63,7 +63,11 @@ pub struct Snapshot {
 
     pub recent_commands: Vec<RecentCommand>,
     pub voice_note: VoiceNote,
-    pub browser_tab: BrowserTab,
+    /// All tabs the user has switched to, sorted ascending by frequency.
+    /// Entries older than 1 hour are pruned by browser_server.rs.
+    /// Schema change: Session 7 replaced `browser_tab` (single object)
+    /// with `browser_tabs` (Vec).
+    pub browser_tabs: Vec<BrowserTabEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,11 +108,21 @@ pub struct VoiceNote {
     pub recorded_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BrowserTab {
-    pub url: Option<String>,
+/// A single tracked browser tab entry.
+///
+/// Schema change (Session 7): `browser_tab` (single object) replaced by
+/// `browser_tabs` (array of entries). Each entry tracks how many times the
+/// user has switched to that URL (`frequency`) and when they last visited it
+/// (`last_seen`). Entries are pruned after 1 hour of inactivity and sorted
+/// ascending by frequency so the least-visited tabs appear at the top.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserTabEntry {
+    pub url: String,
     pub title: Option<String>,
-    pub captured_at: Option<String>,
+    /// How many times the user has switched to this tab since tracking began.
+    pub frequency: u32,
+    /// ISO-8601 UTC timestamp of the most recent activation.
+    pub last_seen: String,
 }
 
 impl Default for Snapshot {
@@ -119,7 +133,7 @@ impl Default for Snapshot {
             active_window: None,
             recent_commands: Vec::new(),
             voice_note: VoiceNote::default(),
-            browser_tab: BrowserTab::default(),
+            browser_tabs: Vec::new(),
         }
     }
 }
@@ -330,9 +344,7 @@ mod tests {
         assert_eq!(json["voice_note"]["transcript"], Value::Null);
         assert_eq!(json["voice_note"]["summary"], Value::Null);
         assert_eq!(json["voice_note"]["recorded_at"], Value::Null);
-        assert_eq!(json["browser_tab"]["url"], Value::Null);
-        assert_eq!(json["browser_tab"]["title"], Value::Null);
-        assert_eq!(json["browser_tab"]["captured_at"], Value::Null);
+        assert_eq!(json["browser_tabs"], Value::Array(Vec::new()));
         // Exactly the six top-level keys — nothing extra, nothing dropped.
         assert_eq!(json.as_object().expect("top-level object").len(), 6);
     }
@@ -359,7 +371,12 @@ mod tests {
                         ran_at: "2026-08-29T08:01:00Z".to_string(),
                     }];
                     s.voice_note.transcript = Some("remember the milk".to_string());
-                    s.browser_tab.url = Some("https://example.com".to_string());
+                    s.browser_tabs = vec![BrowserTabEntry {
+                        url: "https://example.com".to_string(),
+                        title: Some("Example".to_string()),
+                        frequency: 3,
+                        last_seen: "2026-08-29T08:01:00Z".to_string(),
+                    }];
                 })
                 .expect("update");
         }
@@ -372,7 +389,8 @@ mod tests {
         assert_eq!(json["active_window"]["window_title"], "snapshot.rs");
         assert_eq!(json["recent_commands"][0]["command"], "git status");
         assert_eq!(json["voice_note"]["transcript"], "remember the milk");
-        assert_eq!(json["browser_tab"]["url"], "https://example.com");
+        assert_eq!(json["browser_tabs"][0]["url"], "https://example.com");
+        assert_eq!(json["browser_tabs"][0]["frequency"], 3);
     }
 
     #[test]
@@ -433,11 +451,12 @@ mod tests {
                     summary: Some("summary".to_string()),
                     recorded_at: Some("2026-08-29T08:03:00Z".to_string()),
                 };
-                s.browser_tab = BrowserTab {
-                    url: Some("https://example.com/docs".to_string()),
+                s.browser_tabs = vec![BrowserTabEntry {
+                    url: "https://example.com/docs".to_string(),
                     title: Some("Docs".to_string()),
-                    captured_at: Some("2026-08-29T08:04:00Z".to_string()),
-                };
+                    frequency: 1,
+                    last_seen: "2026-08-29T08:04:00Z".to_string(),
+                }];
             })
             .expect("seed other components' keys");
         let before = read_json(&path);
@@ -451,7 +470,7 @@ mod tests {
         let after = read_json(&path);
         assert_eq!(after["active_window"]["app_name"], "notepad.exe");
         assert_eq!(after["active_window"]["window_title"], "todo.txt");
-        for key in ["schema_version", "recent_commands", "voice_note", "browser_tab"] {
+        for key in ["schema_version", "recent_commands", "voice_note", "browser_tabs"] {
             assert_eq!(after[key], before[key], "`{key}` should be unchanged");
         }
     }
